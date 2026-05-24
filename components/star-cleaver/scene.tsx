@@ -412,6 +412,231 @@ function VenatorMothership() {
 }
 
 /* =============================================================
+ * Rebel transport — CR-90-inspired
+ *
+ * One friendly corvette drifts across the mid-distance during
+ * each engagement, left-to-right, slow and stately. It's a
+ * scenery element — never engages, never dies, but its passage
+ * tells the player "there's a fleet here, you're not alone".
+ *
+ * Hammerhead silhouette: wide flat front bulb, long thin tubular
+ * hull, triple engine bank at the rear with blue thruster glow.
+ * Procedural primitives only — no IP-encumbered geometry.
+ * ============================================================= */
+
+function RebelTransport() {
+  const groupRef = useRef<Group>(null)
+  // Period in seconds for one full traverse + offscreen wait.
+  // 90s is slow enough that the corvette reads as massive +
+  // far away. One ship is visible at a time.
+  const CYCLE = 90
+  // Visible portion of the cycle (0..1) — the rest is offscreen.
+  const VIS_START = 0.1
+  const VIS_END = 0.78
+  // Path endpoints in scene units. y = 0.5 sits above the
+  // defended planet (which is centred at y=-4.5), z = -10 puts
+  // it between the player ship and the planet.
+  const FROM = useMemo(() => new Vector3(18, 0.5, -10), [])
+  const TO = useMemo(() => new Vector3(-18, 0.5, -10), [])
+
+  useFrame((state) => {
+    if (!groupRef.current) return
+    const t = (state.clock.elapsedTime % CYCLE) / CYCLE
+    if (t < VIS_START || t > VIS_END) {
+      groupRef.current.visible = false
+      return
+    }
+    groupRef.current.visible = true
+    // Lerp from FROM → TO over the visible portion. Smoothstep
+    // so the corvette eases in/out rather than popping in at
+    // constant velocity.
+    const u = (t - VIS_START) / (VIS_END - VIS_START)
+    const eased = u * u * (3 - 2 * u)
+    groupRef.current.position.lerpVectors(FROM, TO, eased)
+    // Hold a slight pitch so the hammerhead reads as "moving
+    // forward through space" not just sliding across a plane.
+    groupRef.current.rotation.y = -Math.PI / 2 + Math.sin(state.clock.elapsedTime * 0.2) * 0.04
+    groupRef.current.rotation.z = Math.sin(state.clock.elapsedTime * 0.15) * 0.03
+  })
+
+  return (
+    <group ref={groupRef} scale={0.9}>
+      {/* Hammerhead — wide flat front bulb. */}
+      <mesh position={[0, 0, -2.4]} rotation={[Math.PI / 2, 0, 0]}>
+        <cylinderGeometry args={[0.55, 0.32, 0.45, 12]} />
+        <meshStandardMaterial color="#a8aab0" roughness={0.45} metalness={0.55} />
+      </mesh>
+      {/* Front neck — connects hammerhead to main hull. */}
+      <mesh position={[0, 0, -1.6]} rotation={[Math.PI / 2, 0, 0]}>
+        <cylinderGeometry args={[0.22, 0.32, 0.85, 10]} />
+        <meshStandardMaterial color="#8e9098" roughness={0.5} metalness={0.55} />
+      </mesh>
+      {/* Main hull — long thin tube. */}
+      <mesh rotation={[Math.PI / 2, 0, 0]}>
+        <cylinderGeometry args={[0.22, 0.22, 2.6, 12]} />
+        <meshStandardMaterial color="#9b9da4" roughness={0.5} metalness={0.55} />
+      </mesh>
+      {/* Hull spine — slight raised ridge along the top. */}
+      <mesh position={[0, 0.16, 0]}>
+        <boxGeometry args={[0.12, 0.08, 2.0]} />
+        <meshStandardMaterial color="#7a7c84" roughness={0.55} metalness={0.5} />
+      </mesh>
+      {/* Engine cluster — wider block at the rear. */}
+      <mesh position={[0, 0, 1.5]}>
+        <boxGeometry args={[0.7, 0.42, 0.55]} />
+        <meshStandardMaterial color="#7a7c84" roughness={0.55} metalness={0.6} />
+      </mesh>
+      {/* Triple engine glows — Rebel blue. */}
+      {[-0.22, 0, 0.22].map((x, i) => (
+        <mesh key={i} position={[x, 0, 1.85]}>
+          <sphereGeometry args={[0.13, 12, 12]} />
+          <meshBasicMaterial
+            color="#7ac8ff"
+            transparent
+            opacity={0.9}
+            blending={AdditiveBlending}
+            depthWrite={false}
+          />
+        </mesh>
+      ))}
+      {/* Comm dish — small disc on the spine, just behind the neck. */}
+      <mesh position={[0, 0.32, -0.4]} rotation={[Math.PI / 2.4, 0, 0]}>
+        <cylinderGeometry args={[0.1, 0.1, 0.06, 12]} />
+        <meshStandardMaterial color="#6c6e76" roughness={0.5} metalness={0.6} />
+      </mesh>
+      {/* Hammerhead viewport — faint cockpit glow. */}
+      <mesh position={[0, 0.04, -2.65]}>
+        <boxGeometry args={[0.34, 0.08, 0.04]} />
+        <meshStandardMaterial
+          color="#0a1a2a"
+          emissive="#9bd0ff"
+          emissiveIntensity={0.6}
+        />
+      </mesh>
+    </group>
+  )
+}
+
+/* =============================================================
+ * X-Wing squadron — friendly fighters sweeping past
+ *
+ * Three small X-Wing-inspired fighters fly past the camera in
+ * loose formation every ~22 seconds. They enter from the lower-
+ * left, bank up and right, and exit toward the upper-right
+ * background. Pure scenery — they don't fire, can't be hit, but
+ * their presence sells the "you're with a fleet" beat.
+ *
+ * S-foils in attack position (X formation viewed from front),
+ * four engines with red exhaust accents, the Rebel red wing
+ * stripe.
+ * ============================================================= */
+
+function XWing({ phaseOffset }: { phaseOffset: number }) {
+  const groupRef = useRef<Group>(null)
+  const CYCLE = 22 // seconds for one squadron pass
+  const VIS_START = 0.05
+  const VIS_END = 0.6
+  // Path: enter lower-left near foreground, exit upper-right at
+  // mid-distance. Player sees the X-Wings sweep across in front.
+  const FROM = useMemo(() => new Vector3(-12, -3, 3), [])
+  const TO = useMemo(() => new Vector3(14, 4, -12), [])
+
+  useFrame((state) => {
+    if (!groupRef.current) return
+    const t = ((state.clock.elapsedTime + phaseOffset) % CYCLE) / CYCLE
+    if (t < VIS_START || t > VIS_END) {
+      groupRef.current.visible = false
+      return
+    }
+    groupRef.current.visible = true
+    const u = (t - VIS_START) / (VIS_END - VIS_START)
+    // Slight arc on Y — pull up through the middle of the pass.
+    const arcY = Math.sin(u * Math.PI) * 1.2
+    groupRef.current.position.set(
+      FROM.x + (TO.x - FROM.x) * u,
+      FROM.y + (TO.y - FROM.y) * u + arcY,
+      FROM.z + (TO.z - FROM.z) * u,
+    )
+    // Orient toward direction of travel, with a bank into the curve.
+    const dir = TO.clone().sub(FROM).normalize()
+    groupRef.current.lookAt(
+      groupRef.current.position.clone().add(dir),
+    )
+    groupRef.current.rotation.z = Math.sin(u * Math.PI) * 0.45 - 0.2
+  })
+
+  return (
+    <group ref={groupRef} scale={0.32}>
+      {/* Central fuselage — long thin cylinder, pointed forward. */}
+      <mesh rotation={[Math.PI / 2, 0, 0]}>
+        <cylinderGeometry args={[0.14, 0.1, 1.4, 10]} />
+        <meshStandardMaterial color="#d4d4d8" roughness={0.5} metalness={0.4} />
+      </mesh>
+      {/* Nose cone. */}
+      <mesh position={[0, 0, -0.85]} rotation={[Math.PI / 2, 0, 0]}>
+        <coneGeometry args={[0.1, 0.4, 8]} />
+        <meshStandardMaterial color="#bfbfc4" roughness={0.5} metalness={0.45} />
+      </mesh>
+      {/* Cockpit canopy — bubble on top, slightly forward. */}
+      <mesh position={[0, 0.12, -0.2]}>
+        <sphereGeometry args={[0.12, 12, 12]} />
+        <meshStandardMaterial
+          color="#1a1f2a"
+          emissive="#3a6a9a"
+          emissiveIntensity={0.4}
+        />
+      </mesh>
+      {/* S-foils — four wings in X formation when viewed from
+          the front. Each is a flat plank angled away from the
+          fuselage. */}
+      {[
+        { x: -0.32, y: 0.18, rotZ: -0.32 }, // upper-left
+        { x: 0.32, y: 0.18, rotZ: 0.32 },   // upper-right
+        { x: -0.32, y: -0.18, rotZ: 0.32 }, // lower-left
+        { x: 0.32, y: -0.18, rotZ: -0.32 }, // lower-right
+      ].map((w, i) => (
+        <group key={i} position={[w.x, w.y, 0.35]}>
+          <mesh rotation={[0, 0, w.rotZ]}>
+            <boxGeometry args={[0.55, 0.04, 0.5]} />
+            <meshStandardMaterial color="#cccfd4" roughness={0.55} metalness={0.45} />
+          </mesh>
+          {/* Red squadron stripe near wing root. */}
+          <mesh position={[w.x > 0 ? -0.2 : 0.2, 0, 0.05]} rotation={[0, 0, w.rotZ]}>
+            <boxGeometry args={[0.12, 0.045, 0.4]} />
+            <meshStandardMaterial color="#d94a3a" roughness={0.5} metalness={0.3} />
+          </mesh>
+          {/* Engine at wing root — blue exhaust. */}
+          <mesh position={[0, 0, 0.45]}>
+            <sphereGeometry args={[0.07, 10, 10]} />
+            <meshBasicMaterial
+              color="#9bd0ff"
+              transparent
+              opacity={0.95}
+              blending={AdditiveBlending}
+              depthWrite={false}
+            />
+          </mesh>
+        </group>
+      ))}
+    </group>
+  )
+}
+
+function XWingSquadron() {
+  // Three ships in loose formation, staggered by phase offset so
+  // they don't fly stacked on each other. The offsets are small
+  // (~0.7s apart) so they read as a tight wing-line, not a
+  // dispersed convoy.
+  return (
+    <>
+      <XWing phaseOffset={0} />
+      <XWing phaseOffset={0.7} />
+      <XWing phaseOffset={1.4} />
+    </>
+  )
+}
+
+/* =============================================================
  * Beam
  * ============================================================= */
 
@@ -817,6 +1042,15 @@ export function SceneContents({
           the defended planet. Doesn't engage; it's the source the
           fighters spawn from + the silent presence behind everything. */}
       <VenatorMothership />
+
+      {/* Rebel transport — one CR-90-inspired corvette drifts across
+          mid-depth each engagement. Tells the player there's an
+          allied fleet, not just the lone Cleaver. */}
+      <RebelTransport />
+
+      {/* X-Wing squadron — three friendly fighters sweep past the
+          camera in formation periodically. Pure cinematic flavour. */}
+      <XWingSquadron />
 
       <MotionDebris />
 

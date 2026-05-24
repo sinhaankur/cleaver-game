@@ -561,11 +561,15 @@ function TitleOverlay({
         <h2 className="text-3xl sm:text-4xl font-serif italic text-white mb-3">
           Star Cleaver
         </h2>
+        <p className="text-sm sm:text-base text-white/75 leading-relaxed mb-2">
+          We found a weapon in the ruins on Mars.
+        </p>
+        <p className="text-sm sm:text-base text-white/75 leading-relaxed mb-2">
+          We do not know who built it. We know it works.
+        </p>
         <p className="text-sm sm:text-base text-white/75 leading-relaxed mb-6">
-          A weapon woke up. It chose us.
-          <br />
           <span className="text-white/55">
-            Seven worlds. Wave after wave. Hold the line.
+            The aliens are here. The fleet flies with you. Seven worlds.
           </span>
         </p>
         <button
@@ -691,9 +695,10 @@ function VictoryOverlay({ score, onRestart }: { score: number; onRestart: () => 
           They didn&apos;t get past you.
         </h3>
         <p className="text-sm text-white/65 leading-relaxed mb-3">
-          Seven worlds intact. The Cleaver is still warm. The next
-          fleet is months away. Earth&apos;s long-range arrays will
-          see them coming.
+          The Cleaver knew this place. Now you do too. Seven worlds
+          intact. The civilisation that built the weapon lost their
+          war here — yours did not. The fleet stands down. Earth&apos;s
+          long-range arrays will see the next ones coming.
         </p>
         <div className="font-mono text-sm uppercase tracking-[0.22em] text-[#b466ff] mb-6">
           Final score · {score.toLocaleString()}
