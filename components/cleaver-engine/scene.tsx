@@ -35,6 +35,7 @@ import {
   Vector3,
 } from "three"
 import { BrightStarField } from "@/components/universe-engine/bright-star-field"
+import { MilkyWay } from "@/components/universe-engine/milky-way"
 import { TexturedPlanet } from "@/components/universe-engine/planet-body"
 import type { GameState } from "./state"
 import { ALIEN_HP_BASE, isCombatActive } from "./state"
@@ -1114,6 +1115,17 @@ export function SceneContents({
     <>
       <ambientLight intensity={0.22} />
       <directionalLight position={[5, 4, 7]} intensity={1.1} />
+
+      {/* Backdrop layers, far → near:
+          1. MilkyWay — galaxy disc (~30k points, slowly drifting).
+             Sits at scene origin with a slight tilt, scaled to fit
+             the game's coordinate space. The camera lives inside
+             the disc; the band sweeps around the play area.
+          2. BrightStarField — real-position naked-eye stars on the
+             sky shell at radius 150. Painted last among the
+             backdrops so individual stars read crisply against the
+             galaxy haze. */}
+      <MilkyWay />
       <BrightStarField />
 
       <DefendedPlanet world={world} />
