@@ -37,6 +37,7 @@ import {
 import { BrightStarField } from "@/components/universe-engine/bright-star-field"
 import { MilkyWay } from "@/components/universe-engine/milky-way"
 import { TexturedPlanet } from "@/components/universe-engine/planet-body"
+import { Sun, SUN_WORLD_POS } from "@/components/universe-engine/sun"
 import type { GameState } from "./state"
 import { ALIEN_HP_BASE, isCombatActive } from "./state"
 import { type DefendedWorld } from "./targets"
@@ -105,7 +106,20 @@ const PLANET_FRAGMENT = /* glsl */ `
   }
 `
 
+/** Planet centre in the scene — both the textured + procedural paths
+ *  position the planet here. The sun direction passed to the planet
+ *  shaders is computed from this point toward SUN_WORLD_POS. */
+const PLANET_WORLD_POS = new Vector3(-1.5, -4.5, -20)
+
 function DefendedPlanet({ world }: { world: DefendedWorld }) {
+  // Sun direction the planet's shader uses for its day/night
+  // terminator. Computed from the planet's centre toward the visible
+  // sun's world position — so the lit hemisphere lines up with the
+  // sun the player can actually see on screen.
+  const sunDir = useMemo(
+    () => SUN_WORLD_POS.clone().sub(PLANET_WORLD_POS).normalize(),
+    [],
+  )
   // If the world ships a texture, defer to the Universe Engine's
   // textured planet treatment (real NASA imagery + day/night
   // terminator for Earth). Otherwise fall back to the procedural
@@ -119,15 +133,21 @@ function DefendedPlanet({ world }: { world: DefendedWorld }) {
         nightTextureUrl={world.nightTextureUrl}
         atmoColor={world.atmoColor}
         rotationSpeed={world.rotationSpeed}
+        sunDir={sunDir}
       />
     )
   }
-  return <ProceduralPlanet world={world} />
+  return <ProceduralPlanet world={world} sunDir={sunDir} />
 }
 
-function ProceduralPlanet({ world }: { world: DefendedWorld }) {
+function ProceduralPlanet({
+  world,
+  sunDir,
+}: {
+  world: DefendedWorld
+  sunDir: Vector3
+}) {
   const groupRef = useRef<Group>(null)
-  const lightDir = useMemo(() => new Vector3(0.7, 0.4, 0.5).normalize(), [])
 
   useFrame((_, dt) => {
     if (!groupRef.current) return
@@ -144,7 +164,7 @@ function ProceduralPlanet({ world }: { world: DefendedWorld }) {
           uniforms={{
             uColor1: { value: new Color(world.color1) },
             uColor2: { value: new Color(world.color2) },
-            uLightDir: { value: lightDir },
+            uLightDir: { value: sunDir },
           }}
         />
       </mesh>
@@ -1113,8 +1133,10 @@ export function SceneContents({
 
   return (
     <>
-      <ambientLight intensity={0.22} />
-      <directionalLight position={[5, 4, 7]} intensity={1.1} />
+      {/* Low ambient so the shadow side of bodies stays inky-dark
+          rather than crushing to black. Most of the scene's lighting
+          comes from the Sun (point light) below. */}
+      <ambientLight intensity={0.12} />
 
       {/* Backdrop layers, far → near:
           1. MilkyWay — galaxy disc (~30k points, slowly drifting).
@@ -1127,6 +1149,12 @@ export function SceneContents({
              galaxy haze. */}
       <MilkyWay />
       <BrightStarField />
+
+      {/* Sun — visible textured disc + its own point light. The
+          planet's terminator shader uses this same position so the
+          lit hemisphere lines up with what the player sees on
+          screen. */}
+      <Sun />
 
       <DefendedPlanet world={world} />
 
