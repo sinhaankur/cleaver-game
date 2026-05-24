@@ -1,0 +1,32 @@
+{
+  "name": "cleaver-game",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Star Cleaver — a 3D defender game. Side project by Ankur Sinha.",
+  "scripts": {
+    "build": "next build",
+    "dev": "next dev",
+    "lint": "eslint .",
+    "start": "next start"
+  },
+  "dependencies": {
+    "@react-three/fiber": "9.4.0",
+    "next": "16.2.6",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "three": "0.181.2"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.1.9",
+    "@types/node": "^22",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@types/three": "^0.184.0",
+    "postcss": "^8.5.15",
+    "tailwindcss": "^4.1.9",
+    "typescript": "^5"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["sharp"]
+  }
+}
