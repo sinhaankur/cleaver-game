@@ -38,11 +38,39 @@ import {
   type GameState,
   type Phase,
 } from "./state"
-import { WORLDS, WORLD_COUNT } from "./targets"
+import type { DefendedWorld } from "./targets"
 
-const ORIGIN_VIDEO_URL = "https://www.youtube.com/watch?v=IGhZWH-umSk"
+/**
+ * Cleaver Engine — public configuration shape.
+ *
+ * Everything game-specific lives here. Pass a config to
+ * `<CleaverEngine />` and the engine renders that game. Star Cleaver
+ * ships in [games/star-cleaver.config.ts](../../games/star-cleaver.config.ts);
+ * a sibling game would ship a different config with the same shape.
+ */
+export type CleaverEngineConfig = {
+  /** The list of worlds the player defends, one per level. */
+  worlds: DefendedWorld[]
+  /** Narrative copy shown on the title, victory, and defeat screens.
+   *  Per-level briefings live on each `world.briefing` field. */
+  narrative: {
+    workingTitle: string
+    gameTitle: string
+    intro: string[]
+    beginButton: string
+    /** Optional opt-in lore link on the title screen. */
+    originVideoUrl?: string
+    victoryEyebrow: string
+    victoryTitle: string
+    victoryBody: string
+    defeatTitle: string
+    defeatBody: string
+  }
+}
 
-export function StarCleaver() {
+export function CleaverEngine({ config }: { config: CleaverEngineConfig }) {
+  const { worlds, narrative } = config
+  const WORLD_COUNT = worlds.length
   const [state, setState] = useState<GameState>(INITIAL_STATE)
 
   // Refs the scene + swarm read each frame.
@@ -301,7 +329,7 @@ export function StarCleaver() {
     setState({ ...INITIAL_STATE, showOriginLink: false })
   }, [])
 
-  const world = WORLDS[state.worldIndex]
+  const world = worlds[state.worldIndex]
 
   return (
     <div
@@ -310,6 +338,7 @@ export function StarCleaver() {
     >
       <StarCleaverScene
         state={state}
+        worlds={worlds}
         aimWorldDirRef={aimWorldDirRef}
         alienHandleRef={alienHandleRef}
       />
@@ -325,9 +354,7 @@ export function StarCleaver() {
       />
 
       {/* Top-right score. */}
-      {isAimable(state.phase) && (
-        <ScoreBadge score={state.score} />
-      )}
+      {isAimable(state.phase) && <ScoreBadge score={state.score} />}
 
       {/* Top-centre planet health. */}
       {isAimable(state.phase) && (
@@ -336,13 +363,18 @@ export function StarCleaver() {
 
       {/* Overlays. */}
       {state.phase === "title" && (
-        <TitleOverlay onBegin={beginDefense} showOriginLink={state.showOriginLink} />
+        <TitleOverlay
+          narrative={narrative}
+          onBegin={beginDefense}
+          showOriginLink={state.showOriginLink}
+        />
       )}
       {state.phase === "briefing" && (
         <BriefingOverlay
           world={world}
           wave={state.wave}
           worldIndex={state.worldIndex}
+          worldCount={WORLD_COUNT}
           isFirstBriefing={state.worldIndex === 0 && state.wave === 0 && state.score === 0}
           onEngage={engage}
         />
@@ -354,10 +386,15 @@ export function StarCleaver() {
         />
       )}
       {state.phase === "victory" && (
-        <VictoryOverlay score={state.score} onRestart={restart} />
+        <VictoryOverlay narrative={narrative} score={state.score} onRestart={restart} />
       )}
       {state.phase === "defeat" && (
-        <DefeatOverlay worldName={world.name} score={state.score} onRestart={restart} />
+        <DefeatOverlay
+          narrative={narrative}
+          worldName={world.name}
+          score={state.score}
+          onRestart={restart}
+        />
       )}
 
       {(state.phase === "combat" || state.phase === "firing") && (
@@ -575,32 +612,40 @@ function BottomHud({
 /* ---------- Overlays ---------- */
 
 function TitleOverlay({
+  narrative,
   onBegin,
   showOriginLink,
 }: {
+  narrative: CleaverEngineConfig["narrative"]
   onBegin: () => void
   showOriginLink: boolean
 }) {
+  const intro = narrative.intro
+  // Last paragraph dim — soft "the stakes" line.
+  const allButLast = intro.slice(0, -1)
+  const lastLine = intro[intro.length - 1]
   return (
     <OverlayShell>
       <div className="text-center max-w-md">
         <div className="font-mono text-[10px] sm:text-xs uppercase tracking-[0.28em] text-white/60 mb-3">
-          Working title
+          {narrative.workingTitle}
         </div>
         <h2 className="text-3xl sm:text-4xl font-serif italic text-white mb-3">
-          Star Cleaver
+          {narrative.gameTitle}
         </h2>
-        <p className="text-sm sm:text-base text-white/75 leading-relaxed mb-2">
-          We found a weapon in the ruins on Mars.
-        </p>
-        <p className="text-sm sm:text-base text-white/75 leading-relaxed mb-2">
-          We do not know who built it. We know it works.
-        </p>
-        <p className="text-sm sm:text-base text-white/75 leading-relaxed mb-6">
-          <span className="text-white/55">
-            The aliens are here. The fleet flies with you. Seven worlds.
-          </span>
-        </p>
+        {allButLast.map((line, i) => (
+          <p
+            key={i}
+            className="text-sm sm:text-base text-white/75 leading-relaxed mb-2"
+          >
+            {line}
+          </p>
+        ))}
+        {lastLine && (
+          <p className="text-sm sm:text-base text-white/75 leading-relaxed mb-6">
+            <span className="text-white/55">{lastLine}</span>
+          </p>
+        )}
         <button
           onClick={onBegin}
           className="
@@ -611,12 +656,12 @@ function TitleOverlay({
             hover:bg-white/90 transition-colors
           "
         >
-          Begin defense →
+          {narrative.beginButton}
         </button>
-        {showOriginLink && (
+        {showOriginLink && narrative.originVideoUrl && (
           <div className="mt-5 text-[11px] sm:text-xs text-white/45">
             <a
-              href={ORIGIN_VIDEO_URL}
+              href={narrative.originVideoUrl}
               target="_blank"
               rel="noopener noreferrer"
               className="underline underline-offset-4 hover:text-white/70"
@@ -624,7 +669,7 @@ function TitleOverlay({
               Watch the origin clip ↗
             </a>
             <span className="px-1.5">·</span>
-            <span>opens YouTube in a new tab</span>
+            <span>opens in a new tab</span>
           </div>
         )}
       </div>
@@ -636,12 +681,14 @@ function BriefingOverlay({
   world,
   wave,
   worldIndex,
+  worldCount,
   isFirstBriefing,
   onEngage,
 }: {
-  world: (typeof WORLDS)[number]
+  world: DefendedWorld
   wave: number
   worldIndex: number
+  worldCount: number
   isFirstBriefing: boolean
   onEngage: () => void
 }) {
@@ -649,7 +696,7 @@ function BriefingOverlay({
     <OverlayShell>
       <div className="text-center max-w-md">
         <div className="font-mono text-[10px] sm:text-xs uppercase tracking-[0.22em] text-[#b466ff] mb-2">
-          World {worldIndex + 1} of {WORLD_COUNT} · {world.kind}
+          World {worldIndex + 1} of {worldCount} · {world.kind}
         </div>
         <h3 className="text-2xl sm:text-3xl font-serif text-white mb-2">
           {world.name}
@@ -713,21 +760,26 @@ function PauseOverlay({
   )
 }
 
-function VictoryOverlay({ score, onRestart }: { score: number; onRestart: () => void }) {
+function VictoryOverlay({
+  narrative,
+  score,
+  onRestart,
+}: {
+  narrative: CleaverEngineConfig["narrative"]
+  score: number
+  onRestart: () => void
+}) {
   return (
     <OverlayShell>
       <div className="text-center max-w-md">
         <div className="font-mono text-[10px] sm:text-xs uppercase tracking-[0.28em] text-white/60 mb-3">
-          All worlds defended
+          {narrative.victoryEyebrow}
         </div>
         <h3 className="text-3xl sm:text-4xl font-serif italic text-white mb-3">
-          They didn&apos;t get past you.
+          {narrative.victoryTitle}
         </h3>
         <p className="text-sm text-white/65 leading-relaxed mb-3">
-          The Cleaver knew this place. Now you do too. Seven worlds
-          intact. The civilisation that built the weapon lost their
-          war here — yours did not. The fleet stands down. Earth&apos;s
-          long-range arrays will see the next ones coming.
+          {narrative.victoryBody}
         </p>
         <div className="font-mono text-sm uppercase tracking-[0.22em] text-[#b466ff] mb-6">
           Final score · {score.toLocaleString()}
@@ -744,10 +796,12 @@ function VictoryOverlay({ score, onRestart }: { score: number; onRestart: () => 
 }
 
 function DefeatOverlay({
+  narrative,
   worldName,
   score,
   onRestart,
 }: {
+  narrative: CleaverEngineConfig["narrative"]
   worldName: string
   score: number
   onRestart: () => void
@@ -759,11 +813,10 @@ function DefeatOverlay({
           {worldName} · Overrun
         </div>
         <h3 className="text-3xl sm:text-4xl font-serif italic text-white mb-3">
-          They got through.
+          {narrative.defeatTitle}
         </h3>
         <p className="text-sm text-white/65 leading-relaxed mb-3">
-          The Cleaver kept firing until the last leak. It was not
-          enough. The remaining worlds will need someone better.
+          {narrative.defeatBody}
         </p>
         <div className="font-mono text-sm uppercase tracking-[0.22em] text-white/70 mb-6">
           Score · {score.toLocaleString()}

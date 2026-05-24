@@ -3,15 +3,18 @@
 /**
  * Star Cleaver page — full-bleed game container.
  *
- * Lazy-loads the game module so the R3F bundle isn't blocking
- * first paint. The fallback is a black void; first paint is sub-
- * second on a normal connection.
+ * Mounts the Cleaver Engine with the Star Cleaver game's config.
+ * The engine itself is the reusable module
+ * ([components/cleaver-engine/](../components/cleaver-engine/));
+ * the config below is what makes *this* page Star Cleaver and not
+ * some other game built on the same engine.
  */
 
 import dynamic from "next/dynamic"
+import { STAR_CLEAVER_CONFIG } from "@/games/star-cleaver.config"
 
-const StarCleaver = dynamic(
-  () => import("@/components/star-cleaver").then((m) => m.StarCleaver),
+const CleaverEngine = dynamic(
+  () => import("@/components/cleaver-engine").then((m) => m.CleaverEngine),
   {
     ssr: false,
     loading: () => (
@@ -27,7 +30,7 @@ const StarCleaver = dynamic(
 export function StarCleaverPage() {
   return (
     <div className="fixed inset-0 bg-black text-white overflow-hidden">
-      <StarCleaver />
+      <CleaverEngine config={STAR_CLEAVER_CONFIG} />
     </div>
   )
 }

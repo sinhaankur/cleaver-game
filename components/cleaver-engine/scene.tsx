@@ -37,7 +37,7 @@ import {
 import { BrightStarField } from "@/components/star-field/bright-star-field"
 import type { GameState } from "./state"
 import { ALIEN_HP_BASE, isCombatActive } from "./state"
-import { WORLDS, type DefendedWorld } from "./targets"
+import { type DefendedWorld } from "./targets"
 
 /* =============================================================
  * Defended planet
@@ -1077,14 +1077,16 @@ function CameraBreath({ aim }: { aim: { x: number; y: number } }) {
 
 export function SceneContents({
   state,
+  worlds,
   aimWorldDirRef,
   alienHandleRef,
 }: {
   state: GameState
+  worlds: DefendedWorld[]
   aimWorldDirRef: React.MutableRefObject<Vector3>
   alienHandleRef: React.MutableRefObject<AlienHandle | null>
 }) {
-  const world = WORLDS[state.worldIndex]
+  const world = worlds[state.worldIndex]
   const emitterRef = useRef<Mesh>(null)
 
   return (
@@ -1141,6 +1143,7 @@ export function SceneContents({
 
 export function StarCleaverScene(props: {
   state: GameState
+  worlds: DefendedWorld[]
   aimWorldDirRef: React.MutableRefObject<Vector3>
   alienHandleRef: React.MutableRefObject<AlienHandle | null>
 }) {
@@ -1177,4 +1180,3 @@ export function aimToWorldDir(aim: { x: number; y: number }): Vector3 {
   return new Vector3(aim.x * k, aim.y * k, -1).normalize()
 }
 
-export { WORLDS }
