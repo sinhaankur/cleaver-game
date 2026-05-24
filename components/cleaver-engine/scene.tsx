@@ -36,6 +36,7 @@ import {
 } from "three"
 import { BrightStarField } from "@/components/universe-engine/bright-star-field"
 import { MilkyWay } from "@/components/universe-engine/milky-way"
+import { NamedBodiesDrift } from "@/components/universe-engine/named-bodies"
 import { TexturedPlanet } from "@/components/universe-engine/planet-body"
 import { Sun, SUN_WORLD_POS } from "@/components/universe-engine/sun"
 import type { GameState } from "./state"
@@ -1171,6 +1172,12 @@ export function SceneContents({
       {/* X-Wing squadron — three friendly fighters sweep past the
           camera in formation periodically. Pure cinematic flavour. */}
       <XWingSquadron />
+
+      {/* Real spacecraft as scenery — Voyager 1, JWST, Parker Solar
+          Probe drift across the scene at different cadences. Procedural
+          silhouettes mirrored from the Universe Engine, no gameplay
+          impact. Reads as "humanity has been here". */}
+      <NamedBodiesDrift />
 
       <MotionDebris />
 
