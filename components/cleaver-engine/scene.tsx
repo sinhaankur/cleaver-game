@@ -38,6 +38,7 @@ import { BrightStarField } from "@/components/universe-engine/bright-star-field"
 import { MilkyWay } from "@/components/universe-engine/milky-way"
 import { NamedBodiesDrift } from "@/components/universe-engine/named-bodies"
 import { TexturedPlanet } from "@/components/universe-engine/planet-body"
+import { SkyPoints } from "@/components/universe-engine/sky-points"
 import { Sun, SUN_WORLD_POS } from "@/components/universe-engine/sun"
 import type { GameState } from "./state"
 import { ALIEN_HP_BASE, isCombatActive } from "./state"
@@ -1150,6 +1151,11 @@ export function SceneContents({
              galaxy haze. */}
       <MilkyWay />
       <BrightStarField />
+      {/* Named deep-sky objects (Andromeda, Orion Nebula, Pleiades,
+          Crab, etc.) projected onto the sky shell at real J2000
+          coordinates. Soft additive halos — galaxies cream, nebulae
+          pink, clusters blue-white. */}
+      <SkyPoints />
 
       {/* Sun — visible textured disc + its own point light. The
           planet's terminator shader uses this same position so the
