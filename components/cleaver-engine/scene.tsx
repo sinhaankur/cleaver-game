@@ -34,7 +34,7 @@ import {
   ShaderMaterial,
   Vector3,
 } from "three"
-import { BrightStarField } from "@/components/star-field/bright-star-field"
+import { BrightStarField } from "@/components/universe-engine/bright-star-field"
 import type { GameState } from "./state"
 import { ALIEN_HP_BASE, isCombatActive } from "./state"
 import { type DefendedWorld } from "./targets"

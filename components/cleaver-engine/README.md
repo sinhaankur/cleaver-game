@@ -1,8 +1,18 @@
 # Cleaver Engine
 
-A self-contained chase-shooter engine for browser-native 3D space combat. Pure data + R3F + Three.js, no external assets in the bundle. Sibling to the [Universe Engine](https://github.com/sinhaankur/portfolio-2026/tree/main/components/universe-engine) on the main portfolio repo — same architectural stance, different problem domain.
+A chase-shooter game layer that sits **on top of the [Universe Engine](../universe-engine/)** ecosystem. The Universe Engine is the foundation — it knows about real stars, planets, J2000 coordinates, the things that exist in space. The Cleaver Engine knows about a game played *inside* that universe — flight feel, alien fighters, beam combat, narrative arcs, victory + defeat states.
 
-This file documents the engine itself. The *game* built on top (Star Cleaver) lives in [`games/star-cleaver.config.ts`](../../games/star-cleaver.config.ts).
+```
+Universe Engine          (the ecosystem — real space, used by website + games)
+   ↑
+Cleaver Engine           (game layer — chase combat, ships, HUD, narrative)
+   ↑
+Star Cleaver config      (this specific game — worlds + story)
+```
+
+The game (Star Cleaver) is a config object. The engine reads the config and renders the game *inside* the Universe Engine's universe. A sibling game would be a different config; the engine stays untouched. Eventually a third layer on top of the Universe Engine (a different game, a tour, a visualization) would reuse the ecosystem the same way.
+
+This file documents the Cleaver Engine layer. The Star Cleaver game's config lives in [`games/star-cleaver.config.ts`](../../games/star-cleaver.config.ts).
 
 ## The seam
 
@@ -83,7 +93,7 @@ If a future game needs different ships visible in the scene, those become config
 ## What lives outside the engine
 
 - [`games/star-cleaver.config.ts`](../../games/star-cleaver.config.ts) — Star Cleaver's specific worlds + narrative
-- [`components/star-field/`](../star-field/) — the `BrightStarField` (8,920 HYG stars on a sky shell), copied from the Universe Engine and pinned at "today" via `lib/sim-time.ts`
+- [`components/universe-engine/`](../universe-engine/) — the slice of the Universe Engine ecosystem the game uses today (currently just `BrightStarField` + the HYG catalog). Grows as the game pulls more from the ecosystem.
 - [`app/star-cleaver-page.tsx`](../../app/star-cleaver-page.tsx) — the page that mounts the engine with Star Cleaver's config
 
 ## Adding a second game
