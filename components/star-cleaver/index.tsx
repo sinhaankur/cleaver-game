@@ -1,17 +1,17 @@
 "use client"
 
 /**
- * Star Cleaver — defender game entry.
+ * Star Cleaver — chase-shooter game entry.
  *
- * Owns React state for the high-level game phase (title / briefing /
- * combat / charging / firing / victory / defeat / paused), and
- * polls the AlienSwarm's imperative handle on a tick to react to
- * kills + leaks. Aim and beam-fire are ref-driven so the inner
- * scene doesn't re-render every frame.
+ * Owns React state for the high-level game phase, runs a single
+ * animation-frame tick that handles weapon heat AND continuous
+ * beam damage on aliens while the trigger is held. No charge
+ * mechanic — hold the fire button (or Space) to keep the beam
+ * on target; release to let the weapon cool.
  *
  * Mobile-first: every control reachable with a thumb. The fire
  * button is a 56px+ target. Aim is set by dragging anywhere over
- * the scene; the reticle visualises where the next beam will go.
+ * the scene; the reticle visualises where the beam will go.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react"
@@ -22,12 +22,14 @@ import {
   type AlienHandle,
 } from "./scene"
 import {
-  BEAM_DURATION_MS,
-  CHARGE_PER_SEC,
+  BEAM_DPS,
   DAMAGE_PER_LEAK,
+  HEAT_COOL_PER_SEC,
+  HEAT_OVERLOAD,
+  HEAT_PER_SEC_FIRING,
+  HEAT_REENGAGE,
   INITIAL_STATE,
   INTERWAVE_PAUSE_MS,
-  MIN_CHARGE_TO_FIRE,
   SCORE_PER_KILL,
   SCORE_PER_WAVE,
   WAVES_PER_WORLD,
@@ -81,26 +83,6 @@ export function StarCleaver() {
     return () => window.removeEventListener("pointermove", handlePointer)
   }, [state.phase, updateAimFromPointer])
 
-  /* ---------- Charge tick ---------- */
-
-  useEffect(() => {
-    if (state.phase !== "charging") return
-    let rafId = 0
-    let last = performance.now()
-    const tick = (now: number) => {
-      const dt = (now - last) / 1000
-      last = now
-      setState((s) => {
-        if (s.phase !== "charging") return s
-        const charge = Math.min(1, s.charge + CHARGE_PER_SEC * dt)
-        return { ...s, charge }
-      })
-      rafId = requestAnimationFrame(tick)
-    }
-    rafId = requestAnimationFrame(tick)
-    return () => cancelAnimationFrame(rafId)
-  }, [state.phase])
-
   /* ---------- Phase transitions ---------- */
 
   const beginDefense = useCallback(() => {
@@ -112,10 +94,9 @@ export function StarCleaver() {
       ...s,
       phase: "combat",
       wave: 0,
-      charge: 0,
+      heat: 0,
       planetHealth: s.worldIndex === 0 ? 1 : s.planetHealth, // reset on first world only
     }))
-    // Spawn wave 0.
     const swarm = alienHandleRef.current
     if (swarm) {
       swarm.spawnWave(enemiesForWave(0), 1)
@@ -123,40 +104,72 @@ export function StarCleaver() {
   }, [])
 
   const onFirePress = useCallback(() => {
-    setState((s) => (s.phase === "combat" ? { ...s, phase: "charging" } : s))
-  }, [])
-
-  const onFireRelease = useCallback(() => {
     setState((s) => {
-      if (s.phase !== "charging") return s
-      if (s.charge < MIN_CHARGE_TO_FIRE) {
-        return { ...s, phase: "combat", charge: 0 }
-      }
-      // Fire: run hit test now while we have the current aim.
-      const swarm = alienHandleRef.current
-      let kills = 0
-      if (swarm) {
-        // Origin: emitter is roughly at (0, -1.5, 6.9) in world space.
-        // (Player ship pos + emitter local · ship scale.)
-        const origin = new Vector3(0, -1.5, 6.9)
-        kills = swarm.hitTest(origin, aimWorldDirRef.current)
-      }
-      return {
-        ...s,
-        phase: "firing",
-        charge: 0,
-        score: s.score + kills * SCORE_PER_KILL,
-      }
+      if (s.phase !== "combat") return s
+      // Can't fire while overloaded; need to drop below the re-engage
+      // threshold first.
+      if (s.heat >= HEAT_REENGAGE && s.heat >= HEAT_OVERLOAD) return s
+      return { ...s, phase: "firing" }
     })
   }, [])
 
-  // Beam visible window then back to combat.
+  const onFireRelease = useCallback(() => {
+    setState((s) => (s.phase === "firing" ? { ...s, phase: "combat" } : s))
+  }, [])
+
+  /* ---------- Continuous beam + heat tick ---------- */
+
+  // Single rAF loop that runs while the player is engaged. Each frame:
+  //   1. If currently firing, apply BEAM_DPS × dt damage to any aliens
+  //      inside the beam cylinder. Killed aliens credit score immediately.
+  //   2. Ramp heat up if firing, down if not. If heat crosses OVERLOAD,
+  //      force-release the trigger (phase → combat) so the player can't
+  //      camp the button — they have to wait for it to cool to REENGAGE.
+  //   3. First kill hides the tutorial nudge.
   useEffect(() => {
-    if (state.phase !== "firing") return
-    const id = window.setTimeout(() => {
-      setState((s) => (s.phase === "firing" ? { ...s, phase: "combat" } : s))
-    }, BEAM_DURATION_MS)
-    return () => window.clearTimeout(id)
+    if (state.phase !== "combat" && state.phase !== "firing") return
+    let rafId = 0
+    let last = performance.now()
+    const tick = (now: number) => {
+      const dt = Math.min(0.05, (now - last) / 1000) // clamp giant frame skips
+      last = now
+      // Read current phase via setState callback (closure phase is stale).
+      let firing = false
+      setState((s) => {
+        firing = s.phase === "firing"
+        return s // no change here; just reading
+      })
+      // Apply beam damage outside setState so we don't double-charge in
+      // StrictMode. Side effect on the swarm ref is fine.
+      let kills = 0
+      if (firing && alienHandleRef.current) {
+        // Emitter world position — ship at (0, -1.2, 9), emitter local
+        // (0, -0.12, -2.5) × scale 0.8 = (0, -0.10, -2.0). Sum: (0, -1.30, 7.0).
+        const origin = new Vector3(0, -1.3, 7.0)
+        kills = alienHandleRef.current.damageBeam(
+          origin,
+          aimWorldDirRef.current,
+          dt,
+          BEAM_DPS,
+        )
+      }
+      setState((s) => {
+        if (s.phase !== "combat" && s.phase !== "firing") return s
+        const heatDelta = firing ? HEAT_PER_SEC_FIRING * dt : -HEAT_COOL_PER_SEC * dt
+        const newHeat = Math.max(0, Math.min(1, s.heat + heatDelta))
+        const forceRelease = firing && newHeat >= HEAT_OVERLOAD
+        return {
+          ...s,
+          phase: forceRelease ? "combat" : s.phase,
+          heat: newHeat,
+          score: kills > 0 ? s.score + kills * SCORE_PER_KILL : s.score,
+          showTutorial: kills > 0 ? false : s.showTutorial,
+        }
+      })
+      rafId = requestAnimationFrame(tick)
+    }
+    rafId = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(rafId)
   }, [state.phase])
 
   /* ---------- Swarm event pump ---------- */
@@ -164,8 +177,7 @@ export function StarCleaver() {
   // Poll the swarm each animation frame for kill/leak events and to
   // detect wave-empty conditions. Cheap: just consumes counters.
   useEffect(() => {
-    if (state.phase !== "combat" && state.phase !== "charging" && state.phase !== "firing")
-      return
+    if (state.phase !== "combat" && state.phase !== "firing") return
     let rafId = 0
     const tick = () => {
       const swarm = alienHandleRef.current
@@ -181,7 +193,6 @@ export function StarCleaver() {
           })
         }
         if (aliveCount === 0) {
-          // Wave cleared — bonus, advance.
           setState((s) => {
             if (s.phase === "defeat" || s.phase === "victory") return s
             const nextWave = s.wave + 1
@@ -194,10 +205,6 @@ export function StarCleaver() {
                 score: s.score + SCORE_PER_WAVE,
               }
             }
-            // Schedule next wave after a brief pause; we set wave/world
-            // here, but actually spawn the swarm in a follow-up effect
-            // because we don't have stable access to the swarm handle
-            // mid-callback (we do, but keeping discipline).
             return {
               ...s,
               phase: "briefing",
@@ -205,6 +212,7 @@ export function StarCleaver() {
               worldIndex: isLastWaveOfWorld ? s.worldIndex + 1 : s.worldIndex,
               score: s.score + SCORE_PER_WAVE,
               planetHealth: isLastWaveOfWorld ? 1 : s.planetHealth, // heal on new world
+              heat: 0,
             }
           })
         }
@@ -246,13 +254,13 @@ export function StarCleaver() {
 
   useEffect(() => {
     const handleDown = (e: KeyboardEvent) => {
-      if (e.code === "Space") {
+      if (e.code === "Space" && !e.repeat) {
         e.preventDefault()
         if (state.phase === "combat") onFirePress()
       }
       if (e.code === "Escape") {
         setState((s) =>
-          ["combat", "charging", "firing"].includes(s.phase)
+          s.phase === "combat" || s.phase === "firing"
             ? { ...s, phase: "paused" }
             : s.phase === "paused"
               ? { ...s, phase: "combat" }
@@ -268,7 +276,7 @@ export function StarCleaver() {
     const handleUp = (e: KeyboardEvent) => {
       if (e.code === "Space") {
         e.preventDefault()
-        if (state.phase === "charging") onFireRelease()
+        if (state.phase === "firing") onFireRelease()
       }
     }
     window.addEventListener("keydown", handleDown)
@@ -352,14 +360,30 @@ export function StarCleaver() {
         <DefeatOverlay worldName={world.name} score={state.score} onRestart={restart} />
       )}
 
-      {(state.phase === "combat" || state.phase === "charging" || state.phase === "firing") && (
-        <BottomHud
-          charge={state.charge}
-          firing={state.phase === "firing"}
-          onFirePress={onFirePress}
-          onFireRelease={onFireRelease}
-        />
+      {(state.phase === "combat" || state.phase === "firing") && (
+        <>
+          <BottomHud
+            heat={state.heat}
+            firing={state.phase === "firing"}
+            onFirePress={onFirePress}
+            onFireRelease={onFireRelease}
+          />
+          {state.showTutorial && (
+            <TutorialNudge dismissed={!state.showTutorial} />
+          )}
+        </>
       )}
+    </div>
+  )
+}
+
+function TutorialNudge({ dismissed }: { dismissed: boolean }) {
+  if (dismissed) return null
+  return (
+    <div className="pointer-events-none absolute bottom-32 sm:bottom-36 left-1/2 -translate-x-1/2 z-30 max-w-[280px] sm:max-w-[340px]">
+      <div className="font-mono text-[10px] sm:text-xs uppercase tracking-[0.16em] text-white/85 bg-black/55 px-3 py-2 rounded backdrop-blur-sm border border-[#b466ff]/40 text-center leading-relaxed">
+        Drag to aim · Hold <span className="text-[#b466ff]">FIRE</span> (or Space) to keep the beam on a target
+      </div>
     </div>
   )
 }
@@ -456,9 +480,7 @@ function phaseLabel(phase: Phase): string {
     case "briefing":
       return "Briefing"
     case "combat":
-      return "Hold the line"
-    case "charging":
-      return "Charging"
+      return "Pursuing"
     case "firing":
       return "Firing"
     case "victory":
@@ -471,46 +493,53 @@ function phaseLabel(phase: Phase): string {
 }
 
 function BottomHud({
-  charge,
+  heat,
   firing,
   onFirePress,
   onFireRelease,
 }: {
-  charge: number
+  heat: number
   firing: boolean
   onFirePress: () => void
   onFireRelease: () => void
 }) {
-  const pct = Math.round(charge * 100)
-  const ready = charge >= MIN_CHARGE_TO_FIRE
+  const pct = Math.round(heat * 100)
+  const overheating = heat >= 0.85
+  const overloaded = heat >= HEAT_OVERLOAD - 0.001
+  // After overload, fire is locked until heat drops below the
+  // re-engage threshold; reflect that in the button copy + colour.
+  const locked = overloaded
   return (
     <div className="absolute bottom-0 left-0 right-0 z-20 px-4 pb-5 pt-3 sm:pb-6 flex flex-col items-center gap-3 pointer-events-none">
       <div className="w-full max-w-[280px] sm:max-w-[320px] pointer-events-none">
         <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-white/70 mb-1.5 text-center">
-          Charge · {pct}%
+          {overloaded ? "Cooling · weapon overloaded" : `Heat · ${pct}%`}
         </div>
         <div className="relative h-1.5 w-full rounded-full bg-white/10 overflow-hidden">
           <div
             className="absolute inset-y-0 left-0 transition-[width] duration-75"
             style={{
               width: `${pct}%`,
-              background: ready
-                ? "linear-gradient(90deg, #b466ff, #ffffff)"
-                : "linear-gradient(90deg, #5a3a8a, #b466ff)",
+              background: overheating
+                ? "linear-gradient(90deg, #ff7a4a, #ff3a3a)"
+                : "linear-gradient(90deg, #b466ff, #ff9a6a)",
             }}
           />
+          {/* Re-engage threshold marker — when cooling, must drop below
+              this to be able to fire again. */}
           <div
             className="absolute inset-y-0"
             style={{
-              left: `${MIN_CHARGE_TO_FIRE * 100}%`,
+              left: `${HEAT_REENGAGE * 100}%`,
               width: 1,
-              background: "rgba(255,255,255,0.4)",
+              background: "rgba(255,255,255,0.35)",
             }}
           />
         </div>
       </div>
       <button
         data-fire-button
+        disabled={locked}
         onPointerDown={(e) => {
           e.preventDefault()
           onFirePress()
@@ -529,15 +558,15 @@ function BottomHud({
           rounded-full
           border transition-colors
           ${
-            firing
-              ? "bg-white text-black border-white shadow-[0_0_24px_rgba(255,255,255,0.6)]"
-              : ready
-                ? "bg-[#b466ff] text-black border-[#b466ff] shadow-[0_0_24px_rgba(180,102,255,0.55)]"
-                : "bg-white/5 text-white border-white/30 hover:bg-white/10"
+            locked
+              ? "bg-red-500/10 text-red-300/70 border-red-500/40 cursor-not-allowed"
+              : firing
+                ? "bg-white text-black border-white shadow-[0_0_24px_rgba(255,255,255,0.6)]"
+                : "bg-[#b466ff] text-black border-[#b466ff] shadow-[0_0_24px_rgba(180,102,255,0.55)] hover:bg-[#c884ff]"
           }
         `}
       >
-        {firing ? "Firing" : ready ? "Release to fire" : "Hold to charge"}
+        {locked ? "Cooling…" : firing ? "Firing" : "Hold to fire"}
       </button>
     </div>
   )

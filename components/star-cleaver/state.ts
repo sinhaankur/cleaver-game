@@ -3,33 +3,30 @@
 /**
  * Star Cleaver — game state.
  *
- * Defender game. The Cleaver is humanity's last gun against an
- * alien force sweeping through the system. Each level is a real
- * world; aliens attack in waves; the player aims and fires the
- * beam to shoot them down before they reach the world.
+ * Chase-shooter framing. The Cleaver pursues alien fighters
+ * through deep space; you fly forward continuously, the world
+ * streaks past, and you hold the trigger to keep a beam on
+ * target. Aliens have HP and weave / bank to break the lock;
+ * any that get past you damage the world behind you.
  *
  * Phases:
- *  - title:      splash screen, "Begin defense" button
- *  - briefing:   world being defended is named, "Engage" to enter combat
- *  - combat:     continuous flight; aliens spawn in waves; player aims
- *  - charging:   fire button held — beam not yet released
- *  - firing:     beam visible, hitscan against active aliens
- *  - victory:    all waves cleared, world saved
+ *  - title:      splash screen
+ *  - briefing:   world named, "Engage" or auto-advance between waves
+ *  - combat:     flying, button NOT held
+ *  - firing:     flying, button HELD — beam emits continuously
+ *  - victory:    all waves cleared
  *  - defeat:     planet health hit zero
  *  - paused:     pause overlay
  *
- * Charge + fire is the only mechanic that needs explicit player
- * input. Aim updates continuously. Aliens move on their own. The
- * combat → firing transition is brief (~200ms beam) and returns
- * straight back to combat — no aftermath phase like the previous
- * destroyer build, because there are many enemies, not one.
+ * Aim updates whenever a pointer is over the scene; the beam
+ * fires while the button is held and resolves per-frame, so a
+ * sustained lock on a target burns through its HP in ~250ms.
  */
 
 export type Phase =
   | "title"
   | "briefing"
   | "combat"
-  | "charging"
   | "firing"
   | "victory"
   | "defeat"
@@ -39,18 +36,23 @@ export type GameState = {
   phase: Phase
   /** Which world we're defending (0..WORLDS.length-1). */
   worldIndex: number
-  /** Wave within the current world (1-indexed for display, 0-indexed for state). */
+  /** Wave within the current world (0-indexed). */
   wave: number
   /** 0..1 — drops when aliens reach the planet. Defeat at 0. */
   planetHealth: number
   /** Cumulative score across waves. */
   score: number
-  /** Charge level 0..1. Builds while phase === "charging". */
-  charge: number
-  /** Aim point in normalized space (-1..1 each axis), relative to scene centre. */
+  /** Weapon heat 0..1. Builds while firing; cools while idle. At 1 the
+   *  weapon force-cools for a moment (forced cooldown) so the player
+   *  can't camp the trigger. Gentle limit, not punitive. */
+  heat: number
+  /** Aim point in normalized space (-1..1 each axis). */
   aim: { x: number; y: number }
   /** Whether the title screen still shows the origin-video link. */
   showOriginLink: boolean
+  /** Tutorial nudge — shown on first combat, dismissed after the first
+   *  hit or after a few seconds. */
+  showTutorial: boolean
 }
 
 export const INITIAL_STATE: GameState = {
@@ -59,28 +61,49 @@ export const INITIAL_STATE: GameState = {
   wave: 0,
   planetHealth: 1,
   score: 0,
-  charge: 0,
+  heat: 0,
   aim: { x: 0, y: 0 },
   showOriginLink: true,
+  showTutorial: true,
 }
 
-/** Required charge to fire. Forces a deliberate trigger pull. */
-export const MIN_CHARGE_TO_FIRE = 0.25
+/** Beam visible duration is now continuous — these constants drive the
+ *  per-frame DPS math the AlienSwarm uses to burn down HP. */
 
-/** Charge rate per second while button is held. */
-export const CHARGE_PER_SEC = 1.4
+/** How fast heat builds per second of firing. 1.0 = full bar in 1s of fire. */
+export const HEAT_PER_SEC_FIRING = 0.55
+/** How fast heat cools per second when not firing. */
+export const HEAT_COOL_PER_SEC = 0.65
+/** Force-cooldown threshold — at this heat level, fire button is auto-released. */
+export const HEAT_OVERLOAD = 1.0
+/** Below this heat level, weapon can fire again after an overload. */
+export const HEAT_REENGAGE = 0.4
 
-/** Beam visible duration on fire. Short — hitscan resolves immediately. */
-export const BEAM_DURATION_MS = 220
+/** Hit radius for the beam — perpendicular distance from beam centreline
+ *  to alien for a hit. Generous on purpose; aliens have HP so a graze
+ *  doesn't kill. */
+export const BEAM_HIT_RADIUS = 1.5
+
+/** DPS the beam applies per second of continuous contact. An alien with
+ *  HP 1 dies after ~0.4s of sustained beam exposure (with the default
+ *  HP of 1.5 below). */
+export const BEAM_DPS = 4.0
+
+/** Default alien HP. Single hit on a stationary alien is ~0.25s of beam. */
+export const ALIEN_HP_BASE = 1.5
 
 /** Waves per world. */
 export const WAVES_PER_WORLD = 4
 
-/** Base enemies per wave; multiplied by (1 + wave * 0.3) for escalation. */
-export const ENEMIES_BASE = 6
+/** Base enemies for wave 0. Earlier values made the first wave brutal
+ *  for a first-time player; 3 lets the player learn before the count
+ *  ramps. */
+export const ENEMIES_BASE = 3
 
-/** Planet damage per alien that reaches the surface (in 0..1). */
-export const DAMAGE_PER_LEAK = 0.18
+/** Planet damage per alien that gets past the Cleaver. Lower = more
+ *  forgiving. With BASE=3 + DAMAGE=0.10, you can leak 10 aliens across
+ *  a world before defeat — a comfortable error budget. */
+export const DAMAGE_PER_LEAK = 0.1
 
 /** Score per alien killed. */
 export const SCORE_PER_KILL = 100
@@ -93,15 +116,15 @@ export const INTERWAVE_PAUSE_MS = 1800
 
 /** True if the current phase accepts aim input. */
 export function isAimable(phase: Phase): boolean {
-  return phase === "combat" || phase === "charging" || phase === "firing"
+  return phase === "combat" || phase === "firing"
 }
 
 /** True if combat is active and aliens should advance. */
 export function isCombatActive(phase: Phase): boolean {
-  return phase === "combat" || phase === "charging" || phase === "firing"
+  return phase === "combat" || phase === "firing"
 }
 
-/** How many enemies should spawn in this wave. */
+/** How many enemies should spawn in a wave. Gentle ramp: 3, 5, 6, 8. */
 export function enemiesForWave(wave: number): number {
-  return Math.round(ENEMIES_BASE * (1 + wave * 0.35))
+  return Math.round(ENEMIES_BASE * (1 + wave * 0.4))
 }

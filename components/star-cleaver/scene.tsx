@@ -36,7 +36,7 @@ import {
 } from "three"
 import { BrightStarField } from "@/components/star-field/bright-star-field"
 import type { GameState } from "./state"
-import { isAimable, isCombatActive } from "./state"
+import { ALIEN_HP_BASE, isCombatActive } from "./state"
 import { WORLDS, type DefendedWorld } from "./targets"
 
 /* =============================================================
@@ -161,40 +161,43 @@ function DefendedPlanet({ world }: { world: DefendedWorld }) {
  * ============================================================= */
 
 function CleaverShip({
-  charge,
+  heat,
   firing,
   aim,
   emitterRef,
 }: {
-  charge: number
+  heat: number
   firing: boolean
   aim: { x: number; y: number }
   emitterRef: React.RefObject<Mesh | null>
 }) {
   const groupRef = useRef<Group>(null)
   const emitterMatRef = useRef<{ emissiveIntensity?: number }>(null)
+  const trailMatRef = useRef<{ opacity?: number } & { color?: { setHex?: (h: number) => void } }>(null)
 
   useFrame((state) => {
     if (groupRef.current) {
-      // Bank with aim x, pitch with aim y. Damped to avoid jitter.
-      const targetRollZ = -aim.x * 0.45
-      const targetPitchX = -aim.y * 0.25
-      const targetYawY = aim.x * 0.18
+      // Bank harder than before — gives the chase its kinaesthetic edge.
+      const targetRollZ = -aim.x * 0.6
+      const targetPitchX = -aim.y * 0.35
+      const targetYawY = aim.x * 0.22
       groupRef.current.rotation.z +=
         (targetRollZ - groupRef.current.rotation.z) * 0.12
       groupRef.current.rotation.x +=
         (targetPitchX - groupRef.current.rotation.x) * 0.12
       groupRef.current.rotation.y +=
         (targetYawY - groupRef.current.rotation.y) * 0.12
-      // Lateral drift — small offset toward aim direction for parallax.
+      // Lateral drift + slight Z bob — "this thing is actually flying".
       const t = state.clock.elapsedTime
-      groupRef.current.position.x = aim.x * 0.4 + Math.sin(t * 0.6) * 0.05
-      groupRef.current.position.y = -1.5 + aim.y * 0.25 + Math.sin(t * 0.45) * 0.04
+      groupRef.current.position.x = aim.x * 0.5 + Math.sin(t * 0.6) * 0.06
+      groupRef.current.position.y = -1.2 + aim.y * 0.3 + Math.sin(t * 0.45) * 0.05
+      groupRef.current.position.z = 9 + Math.sin(t * 0.8) * 0.08
     }
     const mat = emitterMatRef.current
     if (mat) {
       const pulse = 0.4 + Math.sin(state.clock.elapsedTime * 6) * 0.15
-      mat.emissiveIntensity = firing ? 8.0 : 0.4 + charge * (1.8 + pulse * 0.6)
+      // Heat -> emitter glow. Firing pegs it bright. Overload (heat=1) flares hot.
+      mat.emissiveIntensity = firing ? 8.0 : 0.4 + heat * (1.6 + pulse * 0.5)
     }
   })
 
@@ -205,7 +208,7 @@ function CleaverShip({
   // fin angle, the Cleaver's signature purple accents) so this
   // reads as "Lambda-flavoured gunship" rather than a clone.
   return (
-    <group ref={groupRef} position={[0, -1.5, 9]} scale={0.55}>
+    <group ref={groupRef} position={[0, -1.2, 9]} scale={0.8}>
       {/* Forward fuselage — long, pointed, the defining wedge. */}
       <mesh position={[0, 0, -1.6]} rotation={[Math.PI / 2, 0, 0]}>
         <coneGeometry args={[0.22, 2.0, 6]} />
@@ -268,7 +271,7 @@ function CleaverShip({
         <meshBasicMaterial
           color="#9bd0ff"
           transparent
-          opacity={0.6}
+          opacity={0.65}
           blending={AdditiveBlending}
           depthWrite={false}
         />
@@ -278,7 +281,34 @@ function CleaverShip({
         <meshBasicMaterial
           color="#9bd0ff"
           transparent
-          opacity={0.6}
+          opacity={0.65}
+          blending={AdditiveBlending}
+          depthWrite={false}
+        />
+      </mesh>
+      {/* Engine trail — long stretched cone behind the ship that sells
+          forward flight. Pulse-modulated brightness reads as live thrust;
+          the cone's length is much greater than the thrusters above so
+          it leaves a real wake behind the Cleaver. */}
+      <mesh position={[-0.22, -0.05, 2.6]} rotation={[Math.PI / 2, 0, 0]}>
+        <coneGeometry args={[0.18, 3.5, 12, 1, true]} />
+        <meshBasicMaterial
+          color="#5fa8d8"
+          transparent
+          opacity={0.18}
+          blending={AdditiveBlending}
+          depthWrite={false}
+          ref={(m) => {
+            trailMatRef.current = m as unknown as { opacity?: number; color?: { setHex?: (h: number) => void } }
+          }}
+        />
+      </mesh>
+      <mesh position={[0.22, -0.05, 2.6]} rotation={[Math.PI / 2, 0, 0]}>
+        <coneGeometry args={[0.18, 3.5, 12, 1, true]} />
+        <meshBasicMaterial
+          color="#5fa8d8"
+          transparent
+          opacity={0.18}
           blending={AdditiveBlending}
           depthWrite={false}
         />
@@ -704,37 +734,47 @@ function Beam({
  * ============================================================= */
 
 export type AlienHandle = {
-  /** True if an alive alien is on (or near) the ray; kill it. Returns kills. */
-  hitTest: (origin: Vector3, dir: Vector3) => number
-  /** Reset to a fresh wave with `count` aliens, speed multiplier `speedMul`. */
+  /** Continuous beam damage tick. While firing, the parent calls this each
+   *  frame with the beam origin/direction and the frame delta. Aliens
+   *  inside the beam cylinder lose HP proportional to (dt × dps).
+   *  Returns this frame's kills (so the parent can credit score in real time). */
+  damageBeam: (origin: Vector3, dir: Vector3, dt: number, dps: number) => number
+  /** Spawn a fresh wave. */
   spawnWave: (count: number, speedMul: number) => void
   /** Imperatively clear all (e.g. on defeat / restart). */
   clear: () => void
-  /** Snapshot of state — alive count + escaped count (leak events) since last call. */
+  /** Snapshot of state — alive count + escape events since last call. */
   consumeEvents: () => { kills: number; leaks: number; aliveCount: number }
 }
 
 type Alien = {
   alive: boolean
   pos: Vector3
-  vel: Vector3
-  /** Sinusoidal wobble seed. */
+  /** Sinusoidal wobble seed — drives weave + roll phase. */
   seed: number
-  /** Per-alien speed scalar. */
+  /** Forward speed scalar. */
   speed: number
+  /** Remaining HP. Drops while the beam is on; alive=false at <=0. */
+  hp: number
+  /** Last frame's "I was hit" flag — used to drive the damage flash + evasive nudge. */
+  recentlyHit: boolean
+  /** Time accumulator since last "panic-bank" lateral kick. */
+  panicTimer: number
 }
 
-function makeAlien(speedMul: number): Alien {
+function makeAlien(speedMul: number, baseHp: number): Alien {
   return {
     alive: true,
     pos: new Vector3(
-      (Math.random() - 0.5) * 16, // x: -8..8
-      (Math.random() - 0.4) * 6, // y: -2.4..3.6 (biased above planet)
-      -18 - Math.random() * 6, // z: -18..-24
+      (Math.random() - 0.5) * 18, // x: -9..9 (wider spread)
+      (Math.random() - 0.4) * 7, // y: -2.8..4.2 (biased above planet)
+      -22 - Math.random() * 8, // z: -22..-30 (further away to start)
     ),
-    vel: new Vector3(0, 0, 0), // assigned per-frame from speed
     seed: Math.random() * Math.PI * 2,
-    speed: (1.6 + Math.random() * 0.9) * speedMul,
+    speed: (1.4 + Math.random() * 0.7) * speedMul,
+    hp: baseHp,
+    recentlyHit: false,
+    panicTimer: 0,
   }
 }
 
@@ -742,42 +782,50 @@ const AlienSwarm = (() => {
   return function AlienSwarmImpl({
     handleRef,
     active,
+    alienHpBase,
   }: {
     handleRef: React.MutableRefObject<AlienHandle | null>
     active: boolean
+    alienHpBase: number
   }) {
     const groupRef = useRef<Group>(null)
     const aliensRef = useRef<Alien[]>([])
-    // Events accumulated since the parent last consumed them.
     const eventsRef = useRef({ kills: 0, leaks: 0 })
     const meshesRef = useRef<Map<number, Object3D>>(new Map())
 
-    // Imperative handle for the parent to call.
     useEffect(() => {
       const handle: AlienHandle = {
-        hitTest(origin, dir) {
+        damageBeam(origin, dir, dt, dps) {
+          // Generous hit cone — graze damage falls off with perp distance.
           const ndir = dir.clone().normalize()
-          let kills = 0
-          const HIT_RADIUS = 0.85
+          const HIT_RADIUS = 1.5
+          let killsThisFrame = 0
           for (const a of aliensRef.current) {
             if (!a.alive) continue
-            // Perpendicular distance from alien to the ray.
             const op = a.pos.clone().sub(origin)
             const along = op.dot(ndir)
-            if (along < 0) continue // alien is behind the emitter
+            if (along < 0) continue
             const perp = op.clone().sub(ndir.clone().multiplyScalar(along))
-            if (perp.length() < HIT_RADIUS) {
-              a.alive = false
-              kills += 1
+            const d = perp.length()
+            if (d < HIT_RADIUS) {
+              // Centre of beam = full dps; edge = ~30% dps. Encourages
+              // good aim but rewards persistence.
+              const falloff = 1 - 0.7 * (d / HIT_RADIUS)
+              a.hp -= dps * dt * falloff
+              a.recentlyHit = true
+              if (a.hp <= 0) {
+                a.alive = false
+                killsThisFrame += 1
+              }
             }
           }
-          eventsRef.current.kills += kills
-          return kills
+          eventsRef.current.kills += killsThisFrame
+          return killsThisFrame
         },
         spawnWave(count, speedMul) {
           aliensRef.current = []
           for (let i = 0; i < count; i++) {
-            aliensRef.current.push(makeAlien(speedMul))
+            aliensRef.current.push(makeAlien(speedMul, alienHpBase))
           }
         },
         clear() {
@@ -795,46 +843,48 @@ const AlienSwarm = (() => {
         },
       }
       handleRef.current = handle
-    }, [handleRef])
+    }, [handleRef, alienHpBase])
 
     useFrame((state, dt) => {
       if (!groupRef.current) return
       const t = state.clock.elapsedTime
-      // Step every alien. Keep meshes 1:1 with the array index so we
-      // don't constantly recreate them; visibility is the alive flag.
       for (let i = 0; i < aliensRef.current.length; i++) {
         const a = aliensRef.current[i]
         if (!a.alive) {
-          // Drop the mesh out of sight if it still has one.
           const mesh = meshesRef.current.get(i)
           if (mesh) mesh.visible = false
           continue
         }
-        if (!active) continue
-        // Movement: forward (+z) at speed, with x/y wobble.
-        a.pos.z += a.speed * dt
-        a.pos.x += Math.sin(t * 0.9 + a.seed) * 0.012 * a.speed
-        a.pos.y += Math.cos(t * 0.7 + a.seed * 1.3) * 0.01 * a.speed
-        if (a.pos.z > 11) {
-          // Leak — past the player toward the planet behind us.
-          a.alive = false
-          eventsRef.current.leaks += 1
+        if (active) {
+          // Forward (+z) drift toward the player.
+          a.pos.z += a.speed * dt
+          // Weave — wider amplitude than before, gives the chase
+          // feel "things are zigging, not just floating".
+          a.pos.x += Math.sin(t * 1.4 + a.seed) * 0.05 * a.speed
+          a.pos.y += Math.cos(t * 1.1 + a.seed * 1.3) * 0.04 * a.speed
+          // Panic-bank — every few seconds, if alien has been hit recently,
+          // it kicks laterally to break the beam lock.
+          a.panicTimer += dt
+          if (a.recentlyHit && a.panicTimer > 0.6) {
+            const dx = (Math.sin(a.seed * 3.7) > 0 ? 1 : -1) * 1.2
+            const dy = Math.cos(a.seed * 2.1) * 0.6
+            a.pos.x += dx * dt * 3
+            a.pos.y += dy * dt * 3
+            a.panicTimer = 0
+          }
+          a.recentlyHit = false // reset each frame
+          if (a.pos.z > 11) {
+            a.alive = false
+            eventsRef.current.leaks += 1
+          }
         }
-      }
-      // Position the rendered meshes.
-      for (let i = 0; i < aliensRef.current.length; i++) {
-        const a = aliensRef.current[i]
         const mesh = meshesRef.current.get(i)
-        if (!mesh) continue
-        if (!a.alive) {
-          mesh.visible = false
-          continue
+        if (mesh) {
+          mesh.visible = true
+          mesh.position.copy(a.pos)
+          mesh.rotation.y = t * 1.2 + a.seed
+          mesh.rotation.z = Math.sin(t * 1.5 + a.seed) * 0.3
         }
-        mesh.visible = true
-        mesh.position.copy(a.pos)
-        // Slow yaw spin for menace.
-        mesh.rotation.y = t * 1.2 + a.seed
-        mesh.rotation.z = Math.sin(t * 1.5 + a.seed) * 0.2
       }
     })
 
@@ -925,20 +975,22 @@ const DEBRIS_VERTEX = /* glsl */ `
   uniform float uPixelRatio;
   varying float vBrightness;
   void main() {
-    // Forward streaming: z cycles from -40 → +18 over (10 / speed) seconds.
-    float speed = 0.8 + aSeed.x * 1.6;
+    // Forward streaming: z cycles from -40 → +18 faster than before so
+    // the chase reads as actual flight, not a leisurely cruise.
+    float speed = 1.8 + aSeed.x * 2.4;
     float cycle = 58.0 / speed;
     float zPhase = mod(uTime + aSeed.y * cycle, cycle) / cycle; // 0..1
     float z = -40.0 + zPhase * 58.0;
-    // Lateral position from seed.
+    // Lateral position from seed — tightened slightly so streaks
+    // cluster near the camera axis, focused-attention feel.
     float ang = aSeed.z * 6.2831853;
-    float radius = 2.0 + aSeed.x * 9.0;
+    float radius = 1.8 + aSeed.x * 8.0;
     vec3 pos = vec3(cos(ang) * radius, sin(ang) * radius * 0.55, z);
     vec4 mv = modelViewMatrix * vec4(pos, 1.0);
     gl_Position = projectionMatrix * mv;
-    // Smaller in the distance, bigger up close — gives them motion presence.
-    gl_PointSize = (2.0 + zPhase * 6.0) * uPixelRatio;
-    vBrightness = 0.4 + zPhase * 0.6;
+    // Bigger near-field streaks for more visual punch.
+    gl_PointSize = (2.5 + zPhase * 8.0) * uPixelRatio;
+    vBrightness = 0.45 + zPhase * 0.65;
   }
 `
 const DEBRIS_FRAGMENT = /* glsl */ `
@@ -947,7 +999,7 @@ const DEBRIS_FRAGMENT = /* glsl */ `
     vec2 uv = gl_PointCoord - vec2(0.5);
     float d = length(uv);
     if (d > 0.5) discard;
-    float a = (1.0 - smoothstep(0.0, 0.5, d)) * vBrightness * 0.55;
+    float a = (1.0 - smoothstep(0.0, 0.5, d)) * vBrightness * 0.75;
     gl_FragColor = vec4(0.85, 0.9, 1.0, a);
   }
 `
@@ -956,7 +1008,9 @@ function MotionDebris() {
   const matRef = useRef<ShaderMaterial>(null)
   const gl = useThree((s) => s.gl)
   const geometry = useMemo(() => {
-    const N = 280
+    // Doubled from 280 → 560 streaks. Cheap on GPU; thick enough to
+    // read as "we're tearing through space" rather than "drifting".
+    const N = 560
     const seeds = new Float32Array(N * 3)
     for (let i = 0; i < N; i++) {
       seeds[i * 3 + 0] = Math.random() // x.r: radial size
@@ -1005,15 +1059,18 @@ function MotionDebris() {
 function CameraBreath({ aim }: { aim: { x: number; y: number } }) {
   const { camera } = useThree()
   useEffect(() => {
-    camera.position.set(0, 0.5, 14)
+    camera.position.set(0, 0.7, 14)
     camera.lookAt(0, -0.5, 0)
   }, [camera])
   useFrame((state) => {
     const t = state.clock.elapsedTime
-    // Subtle sway — keeps the frame alive even when nothing is happening.
-    camera.position.x = Math.sin(t * 0.32) * 0.18 + aim.x * 0.5
-    camera.position.y = 0.5 + Math.sin(t * 0.27) * 0.12 + aim.y * 0.3
-    camera.lookAt(aim.x * 1.6, -0.5 + aim.y * 1.0, 0)
+    // Flight feel — more aggressive sway than a passive backdrop. Slight
+    // forward bob on Z so the camera actually "bobs" with the engine
+    // pulses, aim-tracked lateral lean, and a sweep on Y from breath.
+    camera.position.x = Math.sin(t * 0.55) * 0.3 + aim.x * 0.7
+    camera.position.y = 0.7 + Math.sin(t * 0.42) * 0.22 + aim.y * 0.45
+    camera.position.z = 14 + Math.sin(t * 1.1) * 0.18
+    camera.lookAt(aim.x * 2.0, -0.5 + aim.y * 1.2, 0)
   })
   return null
 }
@@ -1057,10 +1114,11 @@ export function SceneContents({
       <AlienSwarm
         handleRef={alienHandleRef}
         active={isCombatActive(state.phase)}
+        alienHpBase={ALIEN_HP_BASE}
       />
 
       <CleaverShip
-        charge={state.charge}
+        heat={state.heat}
         firing={state.phase === "firing"}
         aim={state.aim}
         emitterRef={emitterRef}
