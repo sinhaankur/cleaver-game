@@ -25,10 +25,17 @@ export const STAR_CLEAVER_CONFIG: CleaverEngineConfig = {
       name: "Earth",
       kind: "home world",
       radius: 3.6,
+      // Procedural palette retained as fallback; the real texture
+      // wins when present.
       color1: "#3a76b8",
       color2: "#1a3a5a",
       rotationSpeed: 0.06,
       atmoColor: "#8ab6e8",
+      // NASA Blue Marble + Black Marble (city lights). The engine's
+      // day/night terminator shader fires automatically when both
+      // are set.
+      textureUrl: "/textures/earth.webp",
+      nightTextureUrl: "/textures/earth-night.webp",
       briefing:
         "First contact, first front. Eight billion souls. CR-90 transports are running evacuation drills they always hoped to never need. Don't let them need a second run.",
     },
@@ -41,6 +48,8 @@ export const STAR_CLEAVER_CONFIG: CleaverEngineConfig = {
       color2: "#5a2818",
       rotationSpeed: 0.07,
       atmoColor: "#e8a070",
+      // Solar System Scope CC BY Mars surface map.
+      textureUrl: "/textures/mars.webp",
       briefing:
         "The Cleaver was buried in the dust here. You fly it back to defend the dome cities you took it from. Three thousand colonists below. The aliens want what is under them more.",
     },
@@ -53,6 +62,10 @@ export const STAR_CLEAVER_CONFIG: CleaverEngineConfig = {
       color2: "#6c7888",
       rotationSpeed: 0.05,
       atmoColor: "#bfd2e8",
+      // Stand-in: the engine's lunar map. Europa-specific photography
+      // isn't readily available at this resolution; the Moon's icy
+      // appearance reads close enough at the game's framing distance.
+      textureUrl: "/textures/moon.webp",
       briefing:
         "Liquid ocean under the ice. Whatever lives down there has never known a war. Wedge fighters inbound from the gas giant's shadow — keep them from the surface.",
     },

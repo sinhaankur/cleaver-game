@@ -35,6 +35,7 @@ import {
   Vector3,
 } from "three"
 import { BrightStarField } from "@/components/universe-engine/bright-star-field"
+import { TexturedPlanet } from "@/components/universe-engine/planet-body"
 import type { GameState } from "./state"
 import { ALIEN_HP_BASE, isCombatActive } from "./state"
 import { type DefendedWorld } from "./targets"
@@ -104,6 +105,26 @@ const PLANET_FRAGMENT = /* glsl */ `
 `
 
 function DefendedPlanet({ world }: { world: DefendedWorld }) {
+  // If the world ships a texture, defer to the Universe Engine's
+  // textured planet treatment (real NASA imagery + day/night
+  // terminator for Earth). Otherwise fall back to the procedural
+  // noise shader below — used for synthetic/exoplanet targets we
+  // don't have textures for (Titan, Proxima b, TRAPPIST-1e, etc.).
+  if (world.textureUrl) {
+    return (
+      <TexturedPlanet
+        radius={world.radius}
+        textureUrl={world.textureUrl}
+        nightTextureUrl={world.nightTextureUrl}
+        atmoColor={world.atmoColor}
+        rotationSpeed={world.rotationSpeed}
+      />
+    )
+  }
+  return <ProceduralPlanet world={world} />
+}
+
+function ProceduralPlanet({ world }: { world: DefendedWorld }) {
   const groupRef = useRef<Group>(null)
   const lightDir = useMemo(() => new Vector3(0.7, 0.4, 0.5).normalize(), [])
 

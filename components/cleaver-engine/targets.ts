@@ -21,9 +21,21 @@ export type DefendedWorld = {
   name: string
   kind: string
   radius: number
+  /** Procedural fallback palette — used when no `textureUrl` is set.
+   *  The procedural shader interpolates between these two colours
+   *  over a low-frequency noise field. */
   color1: string
   color2: string
   rotationSpeed: number
+  /** Soft rim glow tint. */
   atmoColor: string
   briefing: string
+  /** Optional equirectangular surface texture (URL relative to public/).
+   *  When set, the engine renders the world with the Universe Engine's
+   *  textured planet treatment instead of the procedural shader. Earth
+   *  and Mars ship with real NASA textures via this path. */
+  textureUrl?: string
+  /** Optional night-side texture (city lights, etc.). Activates the
+   *  day/night terminator shader. Currently only meaningful for Earth. */
+  nightTextureUrl?: string
 }
